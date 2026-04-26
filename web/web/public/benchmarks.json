@@ -1,0 +1,266 @@
+{
+  "generated_at_unix": 1777214866,
+  "seed": 42,
+  "pair_density": 0.35,
+  "sizes": [
+    10,
+    30,
+    100,
+    300,
+    1000
+  ],
+  "samples_per_config": 250,
+  "improvement_pairs": 40,
+  "results": [
+    {
+      "algorithm": "dijkstra",
+      "num_tokens": 10,
+      "num_pools": 29,
+      "samples": 250,
+      "median_ms": 0.008208,
+      "min_ms": 0.006958,
+      "max_ms": 0.011125,
+      "improvement_pct": 0.0
+    },
+    {
+      "algorithm": "bellman_ford",
+      "num_tokens": 10,
+      "num_pools": 29,
+      "samples": 250,
+      "median_ms": 0.010375,
+      "min_ms": 0.010166,
+      "max_ms": 0.073541,
+      "improvement_pct": 0.0
+    },
+    {
+      "algorithm": "amount_aware",
+      "num_tokens": 10,
+      "num_pools": 29,
+      "samples": 250,
+      "median_ms": 0.034083,
+      "min_ms": 0.032709,
+      "max_ms": 0.085792,
+      "improvement_pct": 2.8039615399165965
+    },
+    {
+      "algorithm": "split_dp",
+      "num_tokens": 10,
+      "num_pools": 29,
+      "samples": 250,
+      "median_ms": 0.050833,
+      "min_ms": 0.044042,
+      "max_ms": 0.073875,
+      "improvement_pct": 3.255316042071633
+    },
+    {
+      "algorithm": "split_fw",
+      "num_tokens": 10,
+      "num_pools": 29,
+      "samples": 250,
+      "median_ms": 0.097625,
+      "min_ms": 0.089375,
+      "max_ms": 0.117792,
+      "improvement_pct": 3.1553483388186043
+    },
+    {
+      "algorithm": "dijkstra",
+      "num_tokens": 30,
+      "num_pools": 172,
+      "samples": 250,
+      "median_ms": 0.027125,
+      "min_ms": 0.026458,
+      "max_ms": 0.032042,
+      "improvement_pct": -3.9499070776679353
+    },
+    {
+      "algorithm": "bellman_ford",
+      "num_tokens": 30,
+      "num_pools": 172,
+      "samples": 250,
+      "median_ms": 0.038333,
+      "min_ms": 0.037708,
+      "max_ms": 0.042041,
+      "improvement_pct": -3.483438546102838
+    },
+    {
+      "algorithm": "amount_aware",
+      "num_tokens": 30,
+      "num_pools": 172,
+      "samples": 250,
+      "median_ms": 0.174667,
+      "min_ms": 0.171584,
+      "max_ms": 0.238,
+      "improvement_pct": 3.589866466474013
+    },
+    {
+      "algorithm": "split_dp",
+      "num_tokens": 30,
+      "num_pools": 172,
+      "samples": 250,
+      "median_ms": 0.199875,
+      "min_ms": 0.196416,
+      "max_ms": 0.352041,
+      "improvement_pct": 4.627726331701926
+    },
+    {
+      "algorithm": "split_fw",
+      "num_tokens": 30,
+      "num_pools": 172,
+      "samples": 250,
+      "median_ms": 0.595375,
+      "min_ms": 0.554917,
+      "max_ms": 1.711125,
+      "improvement_pct": 4.5222677172109105
+    },
+    {
+      "algorithm": "dijkstra",
+      "num_tokens": 100,
+      "num_pools": 632,
+      "samples": 250,
+      "median_ms": 0.094458,
+      "min_ms": 0.091583,
+      "max_ms": 0.137584,
+      "improvement_pct": -2.07673703190402
+    },
+    {
+      "algorithm": "bellman_ford",
+      "num_tokens": 100,
+      "num_pools": 632,
+      "samples": 250,
+      "median_ms": 0.141,
+      "min_ms": 0.139291,
+      "max_ms": 0.156375,
+      "improvement_pct": -3.646417312616454
+    },
+    {
+      "algorithm": "amount_aware",
+      "num_tokens": 100,
+      "num_pools": 632,
+      "samples": 250,
+      "median_ms": 0.574542,
+      "min_ms": 0.5665,
+      "max_ms": 0.646166,
+      "improvement_pct": 4.053931510752043
+    },
+    {
+      "algorithm": "split_dp",
+      "num_tokens": 100,
+      "num_pools": 632,
+      "samples": 250,
+      "median_ms": 0.617958,
+      "min_ms": 0.602042,
+      "max_ms": 1.992375,
+      "improvement_pct": 4.690292964628762
+    },
+    {
+      "algorithm": "split_fw",
+      "num_tokens": 100,
+      "num_pools": 632,
+      "samples": 250,
+      "median_ms": 2.039125,
+      "min_ms": 1.970916,
+      "max_ms": 5.671,
+      "improvement_pct": 4.701711406122995
+    },
+    {
+      "algorithm": "dijkstra",
+      "num_tokens": 300,
+      "num_pools": 1932,
+      "samples": 250,
+      "median_ms": 0.294042,
+      "min_ms": 0.289708,
+      "max_ms": 0.369375,
+      "improvement_pct": -1.922862057712943
+    },
+    {
+      "algorithm": "bellman_ford",
+      "num_tokens": 300,
+      "num_pools": 1932,
+      "samples": 250,
+      "median_ms": 0.388,
+      "min_ms": 0.381958,
+      "max_ms": 1.346875,
+      "improvement_pct": -6.1273951888887
+    },
+    {
+      "algorithm": "amount_aware",
+      "num_tokens": 300,
+      "num_pools": 1932,
+      "samples": 250,
+      "median_ms": 1.705542,
+      "min_ms": 1.668208,
+      "max_ms": 2.395083,
+      "improvement_pct": 3.106015700846218
+    },
+    {
+      "algorithm": "split_dp",
+      "num_tokens": 300,
+      "num_pools": 1932,
+      "samples": 250,
+      "median_ms": 1.793458,
+      "min_ms": 1.732083,
+      "max_ms": 2.498083,
+      "improvement_pct": 4.067866708326636
+    },
+    {
+      "algorithm": "split_fw",
+      "num_tokens": 300,
+      "num_pools": 1932,
+      "samples": 250,
+      "median_ms": 5.934666,
+      "min_ms": 5.859709,
+      "max_ms": 8.234084,
+      "improvement_pct": 4.074299326186411
+    },
+    {
+      "algorithm": "dijkstra",
+      "num_tokens": 1000,
+      "num_pools": 6273,
+      "samples": 250,
+      "median_ms": 0.988875,
+      "min_ms": 0.973834,
+      "max_ms": 2.872209,
+      "improvement_pct": -0.15285510820144702
+    },
+    {
+      "algorithm": "bellman_ford",
+      "num_tokens": 1000,
+      "num_pools": 6273,
+      "samples": 250,
+      "median_ms": 1.422,
+      "min_ms": 1.39525,
+      "max_ms": 4.537833,
+      "improvement_pct": -3.499034143575379
+    },
+    {
+      "algorithm": "amount_aware",
+      "num_tokens": 1000,
+      "num_pools": 6273,
+      "samples": 250,
+      "median_ms": 5.625083,
+      "min_ms": 5.387542,
+      "max_ms": 7.416625,
+      "improvement_pct": 3.291866749338984
+    },
+    {
+      "algorithm": "split_dp",
+      "num_tokens": 1000,
+      "num_pools": 6273,
+      "samples": 250,
+      "median_ms": 5.759959,
+      "min_ms": 5.613708,
+      "max_ms": 11.507,
+      "improvement_pct": 4.646984312622043
+    },
+    {
+      "algorithm": "split_fw",
+      "num_tokens": 1000,
+      "num_pools": 6273,
+      "samples": 250,
+      "median_ms": 19.993083,
+      "min_ms": 19.466625,
+      "max_ms": 50.8715,
+      "improvement_pct": 4.640577877374174
+    }
+  ]
+}

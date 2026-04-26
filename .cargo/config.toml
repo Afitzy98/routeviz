@@ -1,0 +1,6 @@
+# getrandom (pulled in via rand for WASM) needs this cfg to pick the
+# `wasm_js` backend when building for the browser. Lives here (not in a
+# Cargo.toml [target] table) because manifest-level rustflags are ignored
+# by cargo outside of build scripts.
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

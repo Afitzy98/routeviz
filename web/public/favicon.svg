@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <!-- Dark circular backdrop mirroring the canvas background -->
+  <circle cx="24" cy="24" r="23" fill="#0a0e18" stroke="#c9a227" stroke-width="1.5" />
+
+  <!-- Spoke edges (muted gold) radiating from the centre hub -->
+  <g stroke="#c9a227" stroke-width="1" stroke-linecap="round" opacity="0.55" fill="none">
+    <line x1="24" y1="24" x2="24" y2="8" />
+    <line x1="24" y1="24" x2="38" y2="15" />
+    <line x1="24" y1="24" x2="40" y2="30" />
+    <line x1="24" y1="24" x2="34" y2="40" />
+    <line x1="24" y1="24" x2="14" y2="40" />
+    <line x1="24" y1="24" x2="8" y2="30" />
+    <line x1="24" y1="24" x2="10" y2="15" />
+  </g>
+
+  <!-- Highlighted "active split route": two legs through the centre hub -->
+  <g stroke="#5cb775" stroke-width="2.2" stroke-linecap="round" fill="none" opacity="0.95">
+    <line x1="10" y1="15" x2="24" y2="24" />
+    <line x1="24" y1="24" x2="38" y2="15" />
+  </g>
+
+  <!-- Outer hubs (spokes) -->
+  <g fill="#1a1f2e" stroke="#c9a227" stroke-width="1.2">
+    <circle cx="24" cy="8" r="2.4" />
+    <circle cx="40" cy="30" r="2.4" />
+    <circle cx="34" cy="40" r="2.4" />
+    <circle cx="14" cy="40" r="2.4" />
+    <circle cx="8" cy="30" r="2.4" />
+  </g>
+
+  <!-- Endpoints of the active route: src (green filled) and dst (green filled) -->
+  <g fill="#5cb775" stroke="#0a0e18" stroke-width="0.7">
+    <circle cx="10" cy="15" r="2.8" />
+    <circle cx="38" cy="15" r="2.8" />
+  </g>
+
+  <!-- Central hub (gold) with a subtle bright ring -->
+  <circle cx="24" cy="24" r="4.6" fill="#c9a227" stroke="#ebe4d4" stroke-width="0.8" />
+</svg>
