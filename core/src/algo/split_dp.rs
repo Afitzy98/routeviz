@@ -1,11 +1,9 @@
-use std::collections::HashMap;
-
 use alloy_primitives::{Address, U256};
 
 use crate::algo::amount_aware::MAX_HOPS;
 use crate::algo::bounded_bf::BoundedBfIter;
 use crate::algo::gas::GasModel;
-use crate::algo::path::walk_with_best_pools;
+use crate::algo::path::walk_pool_path;
 use crate::algo::split_common::simulate_allocation;
 use crate::algo::{Leg, Outcome, SolveResult};
 use crate::graph::Graph;
@@ -18,7 +16,7 @@ use crate::trace::Step;
 // 2. For each route r, precompute quotes[r][k] = output when sending
 //    k/N of the input through r alone.
 // 3. dp[i][j] = max output using routes 1..i with j chunks allocated.
-//    Transition: dp[i][j] = max over k of (dp[i-1][j-k] + quote-or-zero).
+//    Transition: maxdp[i][j] =  over k of (dp[i-1][j-k] + quote-or-zero).
 // 4. Backtrack and run a real sequential simulate for honest reporting.
 //
 // The DP objective is optimistic: quotes are computed per-route as if
@@ -29,7 +27,7 @@ use crate::trace::Step;
 
 const K_CANDIDATES: usize = 7;
 const N_CHUNKS: usize = 10;
-const RANK_HARD_CAP: usize = 100;
+const RANK_HARD_CAP: usize = 200;
 
 pub fn solve(
     graph: &Graph,
@@ -73,34 +71,24 @@ pub fn solve(
         };
     }
 
-    let mut by_pair: HashMap<(usize, usize), Vec<usize>> =
-        HashMap::with_capacity(graph.pools.len());
-    for (i, pool) in graph.pools.iter().enumerate() {
-        let Some(a) = graph.index_of(pool.token_a) else {
-            continue;
-        };
-        let Some(b) = graph.index_of(pool.token_b) else {
-            continue;
-        };
-        let key = if a < b { (a, b) } else { (b, a) };
-        by_pair.entry(key).or_default().push(i);
-    }
-
     let dst_token = &graph.tokens[dst_idx];
 
     // Rank candidates by realised output net of leg gas at full amount,
-    // then take top K. See module-level note on why log-weight ranking
-    // isn't safe here.
-    let mut scored: Vec<(Vec<usize>, U256)> = Vec::new();
-    for path in BoundedBfIter::new(graph, src_idx, dst_idx, MAX_HOPS) {
-        if let Some((pools_idx, out, _)) = walk_with_best_pools(graph, &by_pair, &path, amount_in) {
+    // then take top K. Each (token-path, pool-path) pair from
+    // BoundedBfIter is its own candidate — parallel-pool variants of
+    // the same token-path compete on equal footing here, so the top K
+    // can include several pool-paths for the same pair when they're
+    // each individually competitive at the trade size.
+    let mut scored: Vec<(Vec<usize>, Vec<usize>, U256)> = Vec::new();
+    for cand in BoundedBfIter::new(graph, src_idx, dst_idx, MAX_HOPS) {
+        if let Some((out, _)) = walk_pool_path(graph, &cand.tokens, &cand.pools, amount_in) {
             let leg_gas = gas.gas_to_dst_token(
-                gas.gas_units(1, pools_idx.len()),
+                gas.gas_units(1, cand.pools.len()),
                 dst_token.true_price_usd,
                 dst_token.decimals,
             );
             let net = out.saturating_sub(leg_gas);
-            scored.push((path, net));
+            scored.push((cand.tokens, cand.pools, net));
         }
         if scored.len() >= RANK_HARD_CAP {
             break;
@@ -109,37 +97,38 @@ pub fn solve(
     if scored.is_empty() {
         return no_path();
     }
-    scored.sort_by_key(|s| std::cmp::Reverse(s.1));
-    let candidates: Vec<Vec<usize>> = scored
+    scored.sort_by_key(|s| std::cmp::Reverse(s.2));
+    let top: Vec<(Vec<usize>, Vec<usize>)> = scored
         .into_iter()
         .take(K_CANDIDATES)
-        .map(|(p, _)| p)
+        .map(|(t, p, _)| (t, p))
         .collect();
+    let token_paths: Vec<Vec<usize>> = top.iter().map(|(t, _)| t.clone()).collect();
+    let pool_paths: Vec<Vec<usize>> = top.iter().map(|(_, p)| p.clone()).collect();
 
     // quotes[i][k] = output sending k/N of input through route i alone.
     // per_route_gas[i] is the fixed cost charged whenever k > 0.
     let n_u256 = U256::from(N_CHUNKS as u64);
-    let mut quotes: Vec<Vec<U256>> = Vec::with_capacity(candidates.len());
-    let mut per_route_gas: Vec<U256> = Vec::with_capacity(candidates.len());
-    for route in &candidates {
+    let mut quotes: Vec<Vec<U256>> = Vec::with_capacity(top.len());
+    let mut per_route_gas: Vec<U256> = Vec::with_capacity(top.len());
+    for (tokens, pools) in &top {
         let mut row = Vec::with_capacity(N_CHUNKS + 1);
         row.push(U256::ZERO);
         for k in 1..=N_CHUNKS {
             let input = amount_in * U256::from(k as u64) / n_u256;
-            let out = walk_with_best_pools(graph, &by_pair, route, input)
-                .map(|(_, out, _)| out)
+            let out = walk_pool_path(graph, tokens, pools, input)
+                .map(|(out, _)| out)
                 .unwrap_or(U256::ZERO);
             row.push(out);
         }
         quotes.push(row);
-        let hops = route.len().saturating_sub(1);
-        let gas_units = gas.gas_units(1, hops);
+        let gas_units = gas.gas_units(1, pools.len());
         let cost = gas.gas_to_dst_token(gas_units, dst_token.true_price_usd, dst_token.decimals);
         per_route_gas.push(cost);
     }
 
     // dp[i][j] = max output using routes 1..=i with j chunks allocated.
-    let r = candidates.len();
+    let r = top.len();
     let mut prev_row: Vec<Option<U256>> = vec![None; N_CHUNKS + 1];
     prev_row[0] = Some(U256::ZERO);
     let mut choices: Vec<Vec<usize>> = vec![vec![0; N_CHUNKS + 1]; r];
@@ -189,13 +178,13 @@ pub fn solve(
             }
         })
         .collect();
-    let (total_out, per_leg) = simulate_allocation(graph, &candidates, &inputs, &by_pair);
+    let (total_out, per_leg) = simulate_allocation(graph, &token_paths, &pool_paths, &inputs);
 
     let mut legs: Vec<Leg> = Vec::new();
     let mut total_in = U256::ZERO;
     for (i, sim_opt) in per_leg.iter().enumerate() {
         let Some(sim) = sim_opt else { continue };
-        let path_addrs: Vec<Address> = candidates[i]
+        let path_addrs: Vec<Address> = token_paths[i]
             .iter()
             .map(|&ix| graph.address_of(ix))
             .collect();
@@ -224,6 +213,45 @@ pub fn solve(
     let total_hops: usize = legs.iter().map(|l| l.pools_used.len()).sum();
     let gas_units = gas.gas_units(legs.len(), total_hops);
     let gas_cost = gas.gas_to_dst_token(gas_units, dst_token.true_price_usd, dst_token.decimals);
+
+    // Floor at best single path. The DP's optimistic-quote objective can
+    // pick a split whose realised sequential output falls below the
+    // best single-path output (shared-pool depletion). `top[0]` is the
+    // highest-ranked single (token, pool) path; walk it at full amount
+    // and fall back if its net output beats the DP allocation.
+    let dp_net = total_out.saturating_sub(gas_cost);
+    let (best_tokens, best_pools) = &top[0];
+    if let Some((single_out, _)) = walk_pool_path(graph, best_tokens, best_pools, amount_in) {
+        let single_gas_units = gas.gas_units(1, best_pools.len());
+        let single_gas = gas.gas_to_dst_token(
+            single_gas_units,
+            dst_token.true_price_usd,
+            dst_token.decimals,
+        );
+        let single_net = single_out.saturating_sub(single_gas);
+        if single_net > dp_net {
+            let path_addrs: Vec<Address> =
+                best_tokens.iter().map(|&ix| graph.address_of(ix)).collect();
+            let pool_addrs: Vec<Address> = best_pools
+                .iter()
+                .map(|&ix| graph.pools[ix].address)
+                .collect();
+            return SolveResult {
+                outcome: Outcome::FoundSplit {
+                    legs: vec![Leg {
+                        path: path_addrs,
+                        pools_used: pool_addrs,
+                        amount_in,
+                        amount_out: single_out,
+                    }],
+                    amount_in,
+                    amount_out: single_out,
+                    gas_cost: single_gas,
+                },
+                trace: seed_trace(),
+            };
+        }
+    }
 
     SolveResult {
         outcome: Outcome::FoundSplit {

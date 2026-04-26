@@ -83,7 +83,7 @@ cd web && npx tsc -b --noEmit       # TypeScript type-check
 
 ### Benchmarks
 
-The bench binary runs every algorithm against 5 graph sizes (10 / 30 / 100 / 300 / 1000 tokens) with a fixed seed, 250 samples per config, and writes a JSON report the **Benchmarks** tab renders as grouped bar charts + a "vs direct" improvement column.
+The bench binary runs every algorithm against 5 graph sizes (10 / 30 / 100 / 300 / 1000 tokens), with each sample regenerating a fresh graph (seed = base + i) and timing + scoring every algo on one (src, dst, amount) pair. The default 1000 samples per cell gives smooth histograms while keeping the run under ~3 minutes — easy to fit in CI.
 
 ```bash
 cargo run --release -p routeviz-cli --bin bench -- --out web/public/benchmarks.json

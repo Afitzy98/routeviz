@@ -396,6 +396,17 @@ export function ArbView({
       </aside>
 
       <main className="viz">
+        {result && outcomeNoPath && entryToken && (
+          <div className="viz-banner viz-banner-warn">
+            <b>No arbitrage cycle found through {entryToken.symbol}.</b>
+            <span className="hint">
+              Try{" "}
+              <b className="mono">💉 Inject arb</b>, raise{" "}
+              <b className="mono">Price noise</b>, or pick a different
+              entry token.
+            </span>
+          </div>
+        )}
         <TokenGraphCanvas
           graph={graph}
           result={result}

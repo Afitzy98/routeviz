@@ -47,6 +47,40 @@ pub fn build_by_pair(graph: &Graph) -> HashMap<(usize, usize), Vec<usize>> {
     by_pair
 }
 
+// Walk an explicit (token-path, pool-path) using the given pool at
+// each hop — no per-hop pool selection. Returns (final_amount,
+// log_weight_sum). None if any pool is unrelated to its hop's tokens
+// or if intermediate output rounds to zero.
+pub fn walk_pool_path(
+    graph: &Graph,
+    token_path: &[usize],
+    pool_path: &[usize],
+    amount_in: U256,
+) -> Option<(U256, f64)> {
+    if token_path.len() < 2 || pool_path.len() != token_path.len() - 1 {
+        return None;
+    }
+    let mut amount = amount_in;
+    let mut log_weight = 0.0f64;
+    for hop in 0..pool_path.len() {
+        let from_addr = graph.tokens[token_path[hop]].address;
+        let pool = &graph.pools[pool_path[hop]];
+        let to_addr = graph.tokens[token_path[hop + 1]].address;
+        // Sanity: the pool must actually connect (from, to).
+        let valid = (pool.token_a == from_addr && pool.token_b == to_addr)
+            || (pool.token_a == to_addr && pool.token_b == from_addr);
+        if !valid {
+            return None;
+        }
+        amount = pool.output_amount(from_addr, amount);
+        if amount.is_zero() {
+            return None;
+        }
+        log_weight += pool.log_weight(from_addr);
+    }
+    Some((amount, log_weight))
+}
+
 // Walk a token-path picking the best parallel pool at each hop given
 // the running amount. Returns (pool_idxs, final_amount, log_weight_sum).
 // This is the slippage-aware pool selection every algorithm uses to

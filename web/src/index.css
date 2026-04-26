@@ -319,6 +319,46 @@ input[type="checkbox"] {
   padding: 20px;
   min-width: 0;
   min-height: 0;
+  position: relative;
+}
+
+.viz-banner {
+  position: absolute;
+  top: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 18px;
+  border-radius: 8px;
+  text-align: center;
+  pointer-events: none;
+  animation: viz-banner-slide 0.18s ease-out;
+}
+
+.viz-banner-warn {
+  background: rgba(160, 72, 72, 0.18);
+  border: 1px solid rgba(160, 72, 72, 0.55);
+  box-shadow: 0 0 16px rgba(160, 72, 72, 0.25);
+  color: var(--text-0);
+}
+
+.viz-banner b {
+  font-size: 13px;
+  letter-spacing: 0.3px;
+}
+
+@keyframes viz-banner-slide {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 
 .canvas-wrap {
@@ -841,6 +881,27 @@ input[type="checkbox"] {
   font-size: 13px;
 }
 
+.bench-table th {
+  padding: 4px 10px 8px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.bench-table th.bench-col-range,
+.bench-table th.bench-col-histogram {
+  text-align: left;
+  padding-left: 16px;
+}
+
+.bench-table th.bench-col-improvement {
+  text-align: right;
+}
+
 .algo-name {
   color: var(--text-0);
   font-weight: 500;
@@ -856,6 +917,13 @@ input[type="checkbox"] {
   margin-right: 10px;
   vertical-align: middle;
   box-shadow: 0 0 8px currentColor;
+}
+
+.algo-star {
+  margin-left: 8px;
+  color: var(--accent-2);
+  font-size: 14px;
+  text-shadow: 0 0 6px rgba(240, 198, 71, 0.6);
 }
 
 .bar-cell {
@@ -881,12 +949,9 @@ input[type="checkbox"] {
 }
 
 .bench-range {
-  color: var(--text-2);
-  font-family: ui-monospace, Menlo, Consolas, monospace;
-  font-size: 11px;
-  text-align: right;
-  white-space: nowrap;
-  width: 150px;
+  text-align: left;
+  width: 220px;
+  padding-left: 16px;
 }
 
 .bench-improvement {
@@ -895,4 +960,29 @@ input[type="checkbox"] {
   white-space: nowrap;
   width: 90px;
   padding-left: 8px;
+}
+
+.bench-histogram {
+  text-align: left;
+  width: 220px;
+  padding-left: 16px;
+}
+
+.histogram-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 200px;
+}
+
+.histogram {
+  display: block;
+}
+
+.histogram-axis {
+  display: flex;
+  justify-content: space-between;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 9px;
+  color: var(--text-2);
 }

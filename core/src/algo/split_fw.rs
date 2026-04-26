@@ -1,13 +1,11 @@
-use std::collections::HashMap;
-
 use alloy_primitives::{Address, U256};
 
 use crate::algo::amount_aware::MAX_HOPS;
 use crate::algo::bounded_bf::BoundedBfIter;
 use crate::algo::gas::GasModel;
-use crate::algo::path::walk_with_best_pools;
+use crate::algo::path::walk_pool_path;
 use crate::algo::split_common::{
-    build_by_pair, fractional_mul, initial_state, simulate_allocation, simulate_allocation_mut,
+    fractional_mul, initial_state, simulate_allocation, simulate_allocation_mut,
 };
 use crate::algo::{Leg, Outcome, SolveResult};
 use crate::graph::Graph;
@@ -43,9 +41,10 @@ const CONVERGENCE_ALPHA: f64 = 1e-5;
 // Drop legs below 0.1% — anything smaller is line-search noise.
 const MIN_LEG_FRACTION: f64 = 0.001;
 
-// Compute bound on candidate ranking. BoundedBfIter typically emits
-// 30–60 paths at V=50; this cap only matters on pathological graphs.
-const COLD_SEED_HARD_CAP: usize = 100;
+// Compute bound on candidate ranking. With pool-paths (no parallel-pool
+// coalescing) BoundedBfIter emits ~2–3× the candidates it used to;
+// we lift the cap accordingly so the cold seed sees the full set.
+const COLD_SEED_HARD_CAP: usize = 200;
 
 pub fn solve(
     graph: &Graph,
@@ -89,63 +88,81 @@ pub fn solve(
         };
     }
 
-    let by_pair = build_by_pair(graph);
     let dst_token = &graph.tokens[dst_idx];
 
-    let Some(best_single) =
-        best_single_path(graph, src_idx, dst_idx, &by_pair, amount_in, gas, dst_token)
+    let Some((seed_tokens, seed_pools)) =
+        best_single_path(graph, src_idx, dst_idx, amount_in, gas, dst_token)
     else {
         return no_path();
     };
-    let mut paths: Vec<Vec<usize>> = vec![best_single];
+    let mut token_paths: Vec<Vec<usize>> = vec![seed_tokens];
+    let mut pool_paths: Vec<Vec<usize>> = vec![seed_pools];
     let mut alloc: Vec<f64> = vec![1.0];
 
     let iter_budget = max_iterations(graph);
     for _iter in 0..iter_budget {
         // Build the post-flow graph and pick the next direction.
-        let updated_pools = apply_flow(graph, &paths, &alloc, amount_in, &by_pair);
-        let updated_graph = Graph::new(graph.tokens.clone(), updated_pools);
+        let updated_pools_vec = apply_flow(graph, &token_paths, &pool_paths, &alloc, amount_in);
+        let updated_graph = Graph::new(graph.tokens.clone(), updated_pools_vec);
 
-        let best_new_path = match best_single_path(
-            &updated_graph,
-            src_idx,
-            dst_idx,
-            &by_pair,
-            amount_in,
-            gas,
-            dst_token,
-        ) {
-            Some(p) => p,
-            None => break,
-        };
+        let (best_tokens, best_pools) =
+            match best_single_path(&updated_graph, src_idx, dst_idx, amount_in, gas, dst_token) {
+                Some(p) => p,
+                None => break,
+            };
 
-        let best_idx = match paths.iter().position(|p| p == &best_new_path) {
+        // Match candidate by *both* tokens and pools — distinct pool
+        // variants of the same token-path are different directions.
+        let best_idx = match token_paths
+            .iter()
+            .zip(pool_paths.iter())
+            .position(|(t, p)| *t == best_tokens && *p == best_pools)
+        {
             Some(i) => i,
             None => {
-                paths.push(best_new_path);
+                token_paths.push(best_tokens);
+                pool_paths.push(best_pools);
                 alloc.push(0.0);
-                paths.len() - 1
+                token_paths.len() - 1
             }
         };
 
         // Two-stage line search over α ∈ [0, 1] on net output.
-        let base_output = evaluate_net(graph, &paths, &alloc, amount_in, &by_pair, gas, dst_token);
+        let base_output = evaluate_net(
+            graph,
+            &token_paths,
+            &pool_paths,
+            &alloc,
+            amount_in,
+            gas,
+            dst_token,
+        );
         let mut best_alpha = 0.0f64;
         let mut best_output = base_output;
-        let eval_at = |alpha: f64, paths: &[Vec<usize>], alloc: &[f64]| -> U256 {
-            let candidate: Vec<f64> = (0..paths.len())
+        let eval_at = |alpha: f64,
+                       token_paths: &[Vec<usize>],
+                       pool_paths: &[Vec<usize>],
+                       alloc: &[f64]|
+         -> U256 {
+            let candidate: Vec<f64> = (0..token_paths.len())
                 .map(|i| {
                     let base = (1.0 - alpha) * alloc[i];
                     if i == best_idx { base + alpha } else { base }
                 })
                 .collect();
             evaluate_net(
-                graph, paths, &candidate, amount_in, &by_pair, gas, dst_token,
+                graph,
+                token_paths,
+                pool_paths,
+                &candidate,
+                amount_in,
+                gas,
+                dst_token,
             )
         };
         for step in 1..=LINE_SEARCH_STEPS {
             let alpha = step as f64 / LINE_SEARCH_STEPS as f64;
-            let out = eval_at(alpha, &paths, &alloc);
+            let out = eval_at(alpha, &token_paths, &pool_paths, &alloc);
             if out > best_output {
                 best_output = out;
                 best_alpha = alpha;
@@ -159,7 +176,7 @@ pub fn solve(
             for step in 0..=LINE_SEARCH_REFINE_STEPS {
                 let alpha =
                     refine_low + refine_span * step as f64 / LINE_SEARCH_REFINE_STEPS as f64;
-                let out = eval_at(alpha, &paths, &alloc);
+                let out = eval_at(alpha, &token_paths, &pool_paths, &alloc);
                 if out > best_output {
                     best_output = out;
                     best_alpha = alpha;
@@ -182,16 +199,18 @@ pub fn solve(
         .iter()
         .map(|&f| fractional_mul(amount_in, f))
         .collect();
-    let (total_out, per_leg) = simulate_allocation(graph, &paths, &inputs, &by_pair);
+    let (total_out, per_leg) = simulate_allocation(graph, &token_paths, &pool_paths, &inputs);
 
-    let mut legs: Vec<Leg> = (0..paths.len())
+    let mut legs: Vec<Leg> = (0..token_paths.len())
         .filter_map(|i| {
             let sim = per_leg[i].clone()?;
             if alloc[i] < MIN_LEG_FRACTION {
                 return None;
             }
-            let path_addrs: Vec<Address> =
-                paths[i].iter().map(|&ix| graph.address_of(ix)).collect();
+            let path_addrs: Vec<Address> = token_paths[i]
+                .iter()
+                .map(|&ix| graph.address_of(ix))
+                .collect();
             let pool_addrs: Vec<Address> = sim
                 .pool_idxs
                 .iter()
@@ -239,18 +258,18 @@ fn no_path() -> SolveResult {
 // is the sequential simulate; gas counts every active (non-zero) leg.
 fn evaluate_net(
     graph: &Graph,
-    paths: &[Vec<usize>],
+    token_paths: &[Vec<usize>],
+    pool_paths: &[Vec<usize>],
     alloc: &[f64],
     amount_in: U256,
-    by_pair: &HashMap<(usize, usize), Vec<usize>>,
     gas: &GasModel,
-    dst_token: &crate::token::Token,
+    dst_token: &Token,
 ) -> U256 {
     let inputs: Vec<U256> = alloc
         .iter()
         .map(|&f| fractional_mul(amount_in, f))
         .collect();
-    let (gross, per_leg) = simulate_allocation(graph, paths, &inputs, by_pair);
+    let (gross, per_leg) = simulate_allocation(graph, token_paths, pool_paths, &inputs);
     if !gas.enabled() {
         return gross;
     }
@@ -267,17 +286,17 @@ fn evaluate_net(
 // Pool reserves after the current allocation has been simulated.
 fn apply_flow(
     graph: &Graph,
-    paths: &[Vec<usize>],
+    token_paths: &[Vec<usize>],
+    pool_paths: &[Vec<usize>],
     alloc: &[f64],
     amount_in: U256,
-    by_pair: &HashMap<(usize, usize), Vec<usize>>,
 ) -> Vec<Pool> {
     let mut state = initial_state(graph);
     let inputs: Vec<U256> = alloc
         .iter()
         .map(|&f| fractional_mul(amount_in, f))
         .collect();
-    let _ = simulate_allocation_mut(graph, paths, &inputs, by_pair, &mut state);
+    let _ = simulate_allocation_mut(graph, token_paths, pool_paths, &inputs, &mut state);
     graph
         .pools
         .iter()
@@ -297,33 +316,31 @@ fn apply_flow(
         .collect()
 }
 
-// Single path maximising realised output net of per-leg gas at
-// `amount_in`, scored against the supplied graph's reserves.
+// (token_path, pool_path) maximising realised output net of per-leg gas
+// at `amount_in`, scored against the supplied graph's reserves. Each
+// parallel-pool variant of a token-path is its own candidate.
 fn best_single_path(
     graph: &Graph,
     src_idx: usize,
     dst_idx: usize,
-    by_pair: &HashMap<(usize, usize), Vec<usize>>,
     amount_in: U256,
     gas: &GasModel,
     dst_token: &Token,
-) -> Option<Vec<usize>> {
-    let mut best_path: Option<Vec<usize>> = None;
+) -> Option<(Vec<usize>, Vec<usize>)> {
+    let mut best: Option<(Vec<usize>, Vec<usize>)> = None;
     let mut best_net = U256::ZERO;
     let mut examined = 0usize;
-    for candidate in BoundedBfIter::new(graph, src_idx, dst_idx, MAX_HOPS) {
-        if let Some((pools_idx, out, _)) =
-            walk_with_best_pools(graph, by_pair, &candidate, amount_in)
-        {
+    for cand in BoundedBfIter::new(graph, src_idx, dst_idx, MAX_HOPS) {
+        if let Some((out, _)) = walk_pool_path(graph, &cand.tokens, &cand.pools, amount_in) {
             let leg_gas = gas.gas_to_dst_token(
-                gas.gas_units(1, pools_idx.len()),
+                gas.gas_units(1, cand.pools.len()),
                 dst_token.true_price_usd,
                 dst_token.decimals,
             );
             let net = out.saturating_sub(leg_gas);
             if net > best_net {
                 best_net = net;
-                best_path = Some(candidate);
+                best = Some((cand.tokens, cand.pools));
             }
         }
         examined += 1;
@@ -331,7 +348,7 @@ fn best_single_path(
             break;
         }
     }
-    best_path
+    best
 }
 
 #[cfg(test)]

@@ -1,31 +1,48 @@
-use std::collections::HashMap;
-
 use crate::graph::Graph;
 
 // Top-K bounded-hop Bellman-Ford path enumerator.
 //
-// Emits simple paths src → dst with ≤ max_hops edges, ordered by
-// ascending log-weight. Per (hop, node) DP state we keep at most TOP_K
-// candidates. Consumers treat this as a path generator and rerank by
-// realised output net of gas — log-weight is slippage-blind, so the
-// ordering is a heuristic, not a correctness guarantee.
+// Emits simple paths src → dst with ≤ max_hops edges as
+// `CandidatePath { tokens, pools }` pairs, ordered by ascending log-
+// weight. Each parallel pool is its own outgoing edge — no coalescing —
+// so two routes that share a token-path but use different parallel
+// pools both surface as distinct candidates. This is the lever that
+// lets the split routers actually split flow across parallel pools on
+// the same pair (otherwise one pool gets drained while its sibling
+// stays put, instant arb opportunity).
+//
+// Per (hop, node) DP state we keep at most TOP_K candidates. Consumers
+// rerank by realised output net of gas — log-weight is slippage-blind,
+// so the ordering is a heuristic, not a correctness guarantee.
 //
 // Why bounded-hop BF rather than Dijkstra/Yen's: log-weight edges can
 // be negative and the generator can produce real negative cycles.
 // Dijkstra is wrong on negative edges; Yen's inherits that. Bounded
 // hops + simple-path constraint keeps the iter correct on any weights.
 
-const TOP_K: usize = 20;
+// Bumped from 20 → 50 to accommodate parallel-pool variants of the same
+// token-path. With ~2–3 venues per pair on the default generator, the
+// uncoalesced edge count is 2–3× the old coalesced count, so we want
+// proportionally more candidates per state to avoid evicting useful
+// pool-path variants.
+const TOP_K: usize = 50;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CandidatePath {
+    pub tokens: Vec<usize>,
+    pub pools: Vec<usize>,
+}
 
 pub struct BoundedBfIter<'a> {
-    paths: std::vec::IntoIter<Vec<usize>>,
+    paths: std::vec::IntoIter<CandidatePath>,
     _marker: std::marker::PhantomData<&'a Graph>,
 }
 
 #[derive(Clone)]
 struct Candidate {
     weight: f64,
-    path: Vec<usize>,
+    tokens: Vec<usize>,
+    pools: Vec<usize>,
 }
 
 impl<'a> BoundedBfIter<'a> {
@@ -36,26 +53,26 @@ impl<'a> BoundedBfIter<'a> {
         }
         if src == dst {
             return Self {
-                paths: vec![vec![src]].into_iter(),
+                paths: vec![CandidatePath {
+                    tokens: vec![src],
+                    pools: Vec::new(),
+                }]
+                .into_iter(),
                 _marker: std::marker::PhantomData,
             };
         }
 
-        // Coalesce parallel pools to one outgoing edge per (u, v) at
-        // the min log-weight. Consumers rerank with the actual best
-        // pool per hop at trade size.
-        let mut outgoing: Vec<HashMap<usize, f64>> = vec![HashMap::new(); n];
+        // Outgoing edges, one per (u, v, pool) — every parallel pool
+        // gets its own entry so distinct pool-path variants can exist
+        // as separate candidates downstream.
+        let mut outgoing: Vec<Vec<(usize, usize, f64)>> = vec![Vec::new(); n];
         for (u, out) in outgoing.iter_mut().enumerate().take(n) {
             for edge in &graph.adj[u] {
-                let v = edge.to;
                 let w = graph.pools[edge.pool].log_weight(edge.in_token);
                 if !w.is_finite() {
                     continue;
                 }
-                let e = out.entry(v).or_insert(f64::INFINITY);
-                if w < *e {
-                    *e = w;
-                }
+                out.push((edge.to, edge.pool, w));
             }
         }
 
@@ -63,7 +80,8 @@ impl<'a> BoundedBfIter<'a> {
         let mut k_best: Vec<Vec<Vec<Candidate>>> = vec![vec![Vec::new(); n]; max_hops + 1];
         k_best[0][src].push(Candidate {
             weight: 0.0,
-            path: vec![src],
+            tokens: vec![src],
+            pools: Vec::new(),
         });
 
         for h in 1..=max_hops {
@@ -76,9 +94,9 @@ impl<'a> BoundedBfIter<'a> {
                 if prev[u].is_empty() {
                     continue;
                 }
-                for (&v, &w) in &outgoing[u] {
+                for &(v, pool_idx, w) in &outgoing[u] {
                     for cand in &prev[u] {
-                        if cand.path.contains(&v) {
+                        if cand.tokens.contains(&v) {
                             continue; // simple-path constraint
                         }
                         let new_weight = cand.weight + w;
@@ -86,14 +104,18 @@ impl<'a> BoundedBfIter<'a> {
                         if curr[v].len() >= TOP_K && new_weight >= curr[v][TOP_K - 1].weight {
                             continue;
                         }
-                        let mut new_path = Vec::with_capacity(cand.path.len() + 1);
-                        new_path.extend_from_slice(&cand.path);
-                        new_path.push(v);
+                        let mut new_tokens = Vec::with_capacity(cand.tokens.len() + 1);
+                        new_tokens.extend_from_slice(&cand.tokens);
+                        new_tokens.push(v);
+                        let mut new_pools = Vec::with_capacity(cand.pools.len() + 1);
+                        new_pools.extend_from_slice(&cand.pools);
+                        new_pools.push(pool_idx);
                         insert_top_k(
                             &mut curr[v],
                             Candidate {
                                 weight: new_weight,
-                                path: new_path,
+                                tokens: new_tokens,
+                                pools: new_pools,
                             },
                         );
                     }
@@ -115,7 +137,10 @@ impl<'a> BoundedBfIter<'a> {
         Self {
             paths: all
                 .into_iter()
-                .map(|c| c.path)
+                .map(|c| CandidatePath {
+                    tokens: c.tokens,
+                    pools: c.pools,
+                })
                 .collect::<Vec<_>>()
                 .into_iter(),
             _marker: std::marker::PhantomData,
@@ -131,7 +156,7 @@ impl<'a> BoundedBfIter<'a> {
 }
 
 impl<'a> Iterator for BoundedBfIter<'a> {
-    type Item = Vec<usize>;
+    type Item = CandidatePath;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.paths.next()
@@ -299,13 +324,20 @@ mod tests {
         let src = g.index_of(a).unwrap();
         let dst = g.index_of(c).unwrap();
         for path in BoundedBfIter::new(&g, src, dst, 3) {
-            let unique: HashSet<usize> = path.iter().copied().collect();
-            assert_eq!(unique.len(), path.len(), "duplicate node: {path:?}");
+            let unique: HashSet<usize> = path.tokens.iter().copied().collect();
+            assert_eq!(
+                unique.len(),
+                path.tokens.len(),
+                "duplicate node: {:?}",
+                path.tokens
+            );
         }
     }
 
     #[test]
-    fn parallel_pools_coalesce() {
+    fn parallel_pools_emit_separately() {
+        // Each parallel pool should produce its own candidate now —
+        // 4 pools on the A↔B pair means 4 candidates (one per pool).
         let a = addr(1);
         let b = addr(2);
         let g = Graph::new(
@@ -320,7 +352,14 @@ mod tests {
         let src = g.index_of(a).unwrap();
         let dst = g.index_of(b).unwrap();
         let paths: Vec<_> = BoundedBfIter::new(&g, src, dst, 3).collect();
-        assert_eq!(paths.len(), 1, "expected 1 coalesced path, got {paths:?}");
+        assert_eq!(paths.len(), 4, "expected 4 pool-paths, got {}", paths.len());
+        // All four candidates share the same token-path...
+        for p in &paths {
+            assert_eq!(p.tokens, vec![src, dst]);
+        }
+        // ...but each carries a distinct pool index.
+        let pool_idxs: HashSet<usize> = paths.iter().map(|p| p.pools[0]).collect();
+        assert_eq!(pool_idxs.len(), 4);
     }
 
     #[test]
@@ -348,8 +387,10 @@ mod tests {
         assert!(!paths.is_empty());
         for p in &paths {
             // No path revisits a token.
-            let unique: HashSet<usize> = p.iter().copied().collect();
-            assert_eq!(unique.len(), p.len());
+            let unique: HashSet<usize> = p.tokens.iter().copied().collect();
+            assert_eq!(unique.len(), p.tokens.len());
+            // Pool count = hop count.
+            assert_eq!(p.pools.len(), p.tokens.len() - 1);
         }
     }
 }

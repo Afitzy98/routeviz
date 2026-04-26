@@ -2,18 +2,20 @@ use alloy_primitives::{Address, U256};
 
 use crate::algo::bounded_bf::BoundedBfIter;
 use crate::algo::gas::GasModel;
-use crate::algo::path::{build_by_pair, walk_with_best_pools};
+use crate::algo::path::walk_pool_path;
 use crate::algo::{Outcome, SolveResult, Tracer};
 use crate::graph::Graph;
 use crate::trace::Step;
 
-// Single-path routing. Enumerate simple paths via `BoundedBfIter`,
-// score each by realised output net of leg gas at the user's trade
-// size, take the max.
+// Single-path routing. Enumerate (token-path, pool-path) candidates via
+// `BoundedBfIter`, score each by realised output net of leg gas at the
+// user's trade size, take the max. Each parallel pool variant is its
+// own candidate, so we naturally consider `[USDC→USDT via UniV2]` and
+// `[USDC→USDT via Sushi]` as distinct options.
 
 pub const MAX_HOPS: usize = 3;
 
-const HARD_CAP: usize = 100;
+const HARD_CAP: usize = 200;
 
 pub fn solve(
     graph: &Graph,
@@ -59,7 +61,6 @@ pub fn solve(
         };
     }
 
-    let by_pair = build_by_pair(graph);
     let dst_token = &graph.tokens[dst_idx];
 
     let mut best_net = U256::ZERO;
@@ -74,18 +75,19 @@ pub fn solve(
 
     let candidates = BoundedBfIter::new(graph, src_idx, dst_idx, MAX_HOPS);
 
-    for token_path in candidates {
-        let score = walk_with_best_pools(graph, &by_pair, &token_path, amount_in);
-        if let Some((pools_idx, output, log_weight)) = score {
-            let gas_units = gas.gas_units(1, pools_idx.len());
+    for cand in candidates {
+        if let Some((output, log_weight)) =
+            walk_pool_path(graph, &cand.tokens, &cand.pools, amount_in)
+        {
+            let gas_units = gas.gas_units(1, cand.pools.len());
             let leg_gas =
                 gas.gas_to_dst_token(gas_units, dst_token.true_price_usd, dst_token.decimals);
             let net = output.saturating_sub(leg_gas);
             if net > best_net {
                 best_net = net;
                 best_out = output;
-                best_path_idx = Some(token_path);
-                best_pools_idx = Some(pools_idx);
+                best_path_idx = Some(cand.tokens);
+                best_pools_idx = Some(cand.pools);
                 best_log_weight = log_weight;
             }
         }

@@ -6,31 +6,16 @@ use crate::graph::Graph;
 use crate::pool::Pool;
 
 // Sequential-simulation primitives shared by `split_dp` and `split_fw`.
-// Given an allocation (token-paths + input amounts), simulate atomic
-// execution against a mutating copy of the pool reserves so that
-// shared-pool depletion is correctly reflected.
+// Each leg comes in as an explicit (token-path, pool-path) pair — we
+// honour the pool sequence rather than re-picking per hop, so two legs
+// that go through different parallel pools on the same pair correctly
+// drain different pools.
 
 #[derive(Clone, Debug)]
 pub struct LegSim {
     pub amount_in: U256,
     pub amount_out: U256,
     pub pool_idxs: Vec<usize>,
-}
-
-pub fn build_by_pair(graph: &Graph) -> HashMap<(usize, usize), Vec<usize>> {
-    let mut by_pair: HashMap<(usize, usize), Vec<usize>> =
-        HashMap::with_capacity(graph.pools.len());
-    for (i, pool) in graph.pools.iter().enumerate() {
-        let Some(a) = graph.index_of(pool.token_a) else {
-            continue;
-        };
-        let Some(b) = graph.index_of(pool.token_b) else {
-            continue;
-        };
-        let key = if a < b { (a, b) } else { (b, a) };
-        by_pair.entry(key).or_default().push(i);
-    }
-    by_pair
 }
 
 // Constant-product output with overridden reserves.
@@ -69,16 +54,16 @@ pub fn initial_state(graph: &Graph) -> PoolState {
 
 // Simulate an allocation sequentially, biggest leg first (canonical
 // atomic-transaction order — later legs see post-impact reserves).
-// Returns total output and per-leg detail; legs skipped on zero input
-// or missing pools come back as None.
+// Each leg is a (token_path, pool_path) tuple — pool_path[i] is used
+// for hop i with no per-hop pool re-pick.
 pub fn simulate_allocation(
     graph: &Graph,
-    paths: &[Vec<usize>],
+    token_paths: &[Vec<usize>],
+    pool_paths: &[Vec<usize>],
     inputs: &[U256],
-    by_pair: &HashMap<(usize, usize), Vec<usize>>,
 ) -> (U256, Vec<Option<LegSim>>) {
     let mut state = initial_state(graph);
-    simulate_allocation_mut(graph, paths, inputs, by_pair, &mut state)
+    simulate_allocation_mut(graph, token_paths, pool_paths, inputs, &mut state)
 }
 
 // As `simulate_allocation` but with caller-supplied state, so the
@@ -86,16 +71,17 @@ pub fn simulate_allocation(
 // next direction's input graph).
 pub fn simulate_allocation_mut(
     graph: &Graph,
-    paths: &[Vec<usize>],
+    token_paths: &[Vec<usize>],
+    pool_paths: &[Vec<usize>],
     inputs: &[U256],
-    by_pair: &HashMap<(usize, usize), Vec<usize>>,
     state: &mut PoolState,
 ) -> (U256, Vec<Option<LegSim>>) {
-    assert_eq!(paths.len(), inputs.len());
-    let mut order: Vec<usize> = (0..paths.len()).collect();
+    assert_eq!(token_paths.len(), inputs.len());
+    assert_eq!(token_paths.len(), pool_paths.len());
+    let mut order: Vec<usize> = (0..token_paths.len()).collect();
     order.sort_by(|&a, &b| inputs[b].cmp(&inputs[a]));
 
-    let mut per_leg: Vec<Option<LegSim>> = vec![None; paths.len()];
+    let mut per_leg: Vec<Option<LegSim>> = vec![None; token_paths.len()];
     let mut total = U256::ZERO;
 
     for &leg_i in &order {
@@ -103,64 +89,45 @@ pub fn simulate_allocation_mut(
         if a_in.is_zero() {
             continue;
         }
-        let path = &paths[leg_i];
-        if path.len() < 2 {
+        let tokens = &token_paths[leg_i];
+        let pools = &pool_paths[leg_i];
+        if tokens.len() < 2 || pools.len() != tokens.len() - 1 {
             continue;
         }
 
         let mut amount = a_in;
-        let mut pool_idxs: Vec<usize> = Vec::with_capacity(path.len() - 1);
         let mut valid = true;
 
-        for hop in 0..(path.len() - 1) {
-            let u = path[hop];
-            let v = path[hop + 1];
-            let key = if u < v { (u, v) } else { (v, u) };
-            let Some(pool_candidates) = by_pair.get(&key) else {
-                valid = false;
-                break;
-            };
-            let from_addr = graph.tokens[u].address;
-
-            let mut best_pool: Option<usize> = None;
-            let mut best_out = U256::ZERO;
-            for &pool_idx in pool_candidates {
-                let pool = &graph.pools[pool_idx];
-                let (ra, rb) = state[&pool_idx];
-                let (r_in, r_out) = if pool.token_a == from_addr {
-                    (ra, rb)
-                } else {
-                    (rb, ra)
-                };
-                let out = output_with_reserves(pool, from_addr, amount, r_in, r_out);
-                if best_pool.is_none() || out > best_out {
-                    best_pool = Some(pool_idx);
-                    best_out = out;
-                }
-            }
-            let Some(pool_idx) = best_pool else {
-                valid = false;
-                break;
-            };
-
+        for hop in 0..pools.len() {
+            let pool_idx = pools[hop];
             let pool = &graph.pools[pool_idx];
+            let from_addr = graph.tokens[tokens[hop]].address;
             let (ra, rb) = state[&pool_idx];
-            let new_state = if pool.token_a == from_addr {
-                (ra + amount, rb.saturating_sub(best_out))
+            let (r_in, r_out) = if pool.token_a == from_addr {
+                (ra, rb)
             } else {
-                (ra.saturating_sub(best_out), rb + amount)
+                (rb, ra)
+            };
+            let out = output_with_reserves(pool, from_addr, amount, r_in, r_out);
+            if out.is_zero() {
+                valid = false;
+                break;
+            }
+
+            let new_state = if pool.token_a == from_addr {
+                (ra + amount, rb.saturating_sub(out))
+            } else {
+                (ra.saturating_sub(out), rb + amount)
             };
             state.insert(pool_idx, new_state);
-
-            pool_idxs.push(pool_idx);
-            amount = best_out;
+            amount = out;
         }
 
         if valid && !amount.is_zero() {
             per_leg[leg_i] = Some(LegSim {
                 amount_in: a_in,
                 amount_out: amount,
-                pool_idxs,
+                pool_idxs: pools.clone(),
             });
             total += amount;
         }
