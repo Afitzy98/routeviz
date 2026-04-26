@@ -211,7 +211,7 @@ pub fn solve(
     }
 
     let total_in: U256 = legs.iter().map(|l| l.amount_in).sum();
-    legs.sort_by(|a, b| b.amount_in.cmp(&a.amount_in));
+    legs.sort_by_key(|l| std::cmp::Reverse(l.amount_in));
 
     let total_hops: usize = legs.iter().map(|l| l.pools_used.len()).sum();
     let gas_units = gas.gas_units(legs.len(), total_hops);

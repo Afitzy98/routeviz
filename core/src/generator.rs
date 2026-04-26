@@ -330,7 +330,7 @@ impl PoolGenerator {
 
         let mut tokens = Vec::with_capacity(requested);
         // Hubs first, so tokens[0..hub_count] are all hubs.
-        for spec in hubs.into_iter().chain(spokes.into_iter()) {
+        for spec in hubs.into_iter().chain(spokes) {
             let mut bytes = [0u8; 20];
             self.rng.fill_bytes(&mut bytes);
             let price = spec.typical_price_usd * jitter.sample(&mut self.rng);

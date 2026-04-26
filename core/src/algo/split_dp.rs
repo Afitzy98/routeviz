@@ -109,7 +109,7 @@ pub fn solve(
     if scored.is_empty() {
         return no_path();
     }
-    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    scored.sort_by_key(|s| std::cmp::Reverse(s.1));
     let candidates: Vec<Vec<usize>> = scored
         .into_iter()
         .take(K_CANDIDATES)
@@ -217,7 +217,7 @@ pub fn solve(
         return no_path();
     }
 
-    legs.sort_by(|a, b| b.amount_in.cmp(&a.amount_in));
+    legs.sort_by_key(|l| std::cmp::Reverse(l.amount_in));
 
     // Recompute total gas honestly — the DP's transition charged
     // BASE_TX_GAS per active route, but on-chain it's only paid once.
