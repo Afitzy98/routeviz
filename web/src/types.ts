@@ -69,7 +69,8 @@ export type AlgorithmId =
   | "bellman_ford"
   | "amount_aware"
   | "split_dp"
-  | "split_fw";
+  | "split_fw"
+  | "prime";
 
 export type LayoutMode = "hub_spoke" | "force_directed";
 
@@ -116,6 +117,13 @@ export const ALGORITHMS: AlgorithmInfo[] = [
     available: true,
     color: "#c87de0",
     blurb: "Convex-optimisation split router. Each iteration recomputes pool reserves from the committed flow, then runs shortest-path on the updated marginal-price graph to pick the next direction. Correct under shared-pool interference; the CFMM-routing paper version (Angeris et al.).",
+  },
+  {
+    id: "prime",
+    name: "PRIME",
+    available: true,
+    color: "#4ea8de",
+    blurb: "Pool-disjoint split routing via Generalised Network Flow. ASGM optimizer uses only the sign of marginal-price differences — scale-robust across 11 orders of magnitude in token prices. Iterative path discovery with τ threshold; MergeAndExpand exposes parallel pools as per-hop split options.",
   },
 ];
 

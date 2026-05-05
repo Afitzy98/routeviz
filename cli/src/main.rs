@@ -55,6 +55,7 @@ enum AlgoArg {
     AmountAware,
     SplitDp,
     SplitFw,
+    Prime,
 }
 
 impl From<AlgoArg> for Algorithm {
@@ -65,6 +66,7 @@ impl From<AlgoArg> for Algorithm {
             AlgoArg::AmountAware => Algorithm::AmountAware,
             AlgoArg::SplitDp => Algorithm::SplitDp,
             AlgoArg::SplitFw => Algorithm::SplitFw,
+            AlgoArg::Prime => Algorithm::Prime,
         }
     }
 }

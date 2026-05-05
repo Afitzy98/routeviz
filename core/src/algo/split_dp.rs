@@ -25,7 +25,7 @@ use crate::trace::Step;
 // reported number but the chosen allocation can still be suboptimal —
 // FW handles that case better with its honest sequential objective.
 
-const K_CANDIDATES: usize = 7;
+const K_CANDIDATES: usize = 25;
 const N_CHUNKS: usize = 10;
 const RANK_HARD_CAP: usize = 200;
 

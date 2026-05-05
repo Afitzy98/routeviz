@@ -57,6 +57,17 @@ impl Pool {
         r_out_f / r_in_f * fee_mult
     }
 
+    // Marginal exchange rate (∂out/∂in) at a given input flow level, on the
+    // base reserves. For a V2 constant-product pool:
+    //   f(x) = R_out·x·(1-fee) / (R_in + x·(1-fee))
+    //   f'(x) = R_out·(1-fee)·R_in / (R_in + x·(1-fee))²
+    // Single-variant dispatch today; on adding V3/Curve add a `kind` field
+    // and branch here so the rest of PRIME stays oblivious.
+    pub fn marginal_rate_at_flow(&self, in_token: Address, flow: U256) -> f64 {
+        let (r_in, r_out) = self.reserves_for(in_token);
+        marginal_rate_v2(r_in, r_out, self.fee_bps, flow)
+    }
+
     pub fn log_weight(&self, in_token: Address) -> f64 {
         -self.marginal_rate(in_token).ln()
     }
@@ -80,6 +91,20 @@ impl Pool {
         }
         amount
     }
+}
+
+// Same derivative but accepting overridden reserves (post-flow state).
+pub fn marginal_rate_v2(r_in: U256, r_out: U256, fee_bps: u16, flow: U256) -> f64 {
+    let r_in_f = u256_to_f64(r_in);
+    let r_out_f = u256_to_f64(r_out);
+    let fee_mult = (10_000.0 - fee_bps as f64) / 10_000.0;
+    let x_f = u256_to_f64(flow);
+    let denom = r_in_f + x_f * fee_mult;
+    if denom <= 0.0 {
+        return 0.0;
+    }
+    let g = r_out_f * fee_mult * r_in_f / (denom * denom);
+    if g.is_finite() { g } else { 0.0 }
 }
 
 // Lossy — display + routing layer only, never feeds back into U256 swap math.

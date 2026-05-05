@@ -94,6 +94,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("amount_aware", Algorithm::AmountAware, None),
         ("split_dp", Algorithm::SplitDp, None),
         ("split_fw", Algorithm::SplitFw, None),
+        ("prime", Algorithm::Prime, None),
     ];
 
     let mut results: Vec<BenchRow> = Vec::with_capacity(args.sizes.len() * algorithms.len());

@@ -11,6 +11,7 @@ pub mod bounded_bf;
 pub mod dijkstra;
 pub mod gas;
 pub mod path;
+pub mod prime;
 pub mod split_common;
 pub mod split_dp;
 pub mod split_fw;
@@ -28,6 +29,7 @@ pub enum Algorithm {
     AmountAware,
     SplitDp,
     SplitFw,
+    Prime,
 }
 
 // One leg of a split-routing result. amount_in across legs sums to the
@@ -158,5 +160,6 @@ pub fn solve_with_opts(
         Algorithm::SplitFw => {
             split_fw::solve(graph, src, dst, amount_in, opts.with_trace, &opts.gas)
         }
+        Algorithm::Prime => prime::solve(graph, src, dst, amount_in, opts.with_trace, &opts.gas),
     }
 }
